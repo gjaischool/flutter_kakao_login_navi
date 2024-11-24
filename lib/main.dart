@@ -92,7 +92,8 @@ class Place {
 
 // 최적화된 API 클래스
 class KakaoSearchApi {
-  static const String apiKey = "8938a9bd9875675d7c4c6ee";
+  // REST API 키
+  static const String apiKey = "8938a9bd987f7a76e955d29ed7c4c6ee";
   static KakaoSearchApi? _instance;
   http.Client? _client; // HTTP 클라이언트 재사용
 
@@ -188,14 +189,19 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // Kakao SDK 초기화 - 네이티브 앱 키 설정
   KakaoSdk.init(
-    nativeAppKey: 'e02d646fb8b530752b725b323514',
+    nativeAppKey: 'e0d646fb8b530736372d5b725b323514',
   );
   runApp(const KakaoLoginTest());
 }
 
-class KakaoLoginTest extends StatelessWidget {
+class KakaoLoginTest extends StatefulWidget {
   const KakaoLoginTest({super.key});
 
+  @override
+  State<KakaoLoginTest> createState() => _KakaoLoginTestState();
+}
+
+class _KakaoLoginTestState extends State<KakaoLoginTest> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -217,6 +223,76 @@ class KakaoLoginTest extends StatelessWidget {
   }
 }
 
+// 공통으로 사용되는 User 관련 Mixin
+mixin UserStateMixin<T extends StatefulWidget> on State<T> {
+  User? user;
+  bool isLoading = true;
+
+  // 상태 초기화 메서드 추가
+  void resetState() {
+    if (mounted) {
+      setState(() {
+        isLoading = true;
+        user = null;
+      });
+    }
+  }
+
+  Future<void> loadUserData() async {
+    try {
+      User loadedUser = await UserApi.instance.me();
+      if (mounted) {
+        setState(() {
+          user = loadedUser;
+          isLoading = false;
+        });
+      }
+      debugPrint('사용자 정보 요청 성공'
+          '\n회원번호: ${loadedUser.id}'
+          '\n닉네임: ${loadedUser.properties}');
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          user = null;
+          isLoading = false;
+        });
+        handleError('사용자 정보를 불러오는데 실패했습니다: $e');
+      }
+    }
+  }
+
+  void handleError(String message) {
+    if (!mounted) return;
+    ErrorHandler.showError(context, message);
+  }
+
+  Widget buildLoadingIndicator() {
+    return const Center(
+      child: CircularProgressIndicator(),
+    );
+  }
+
+  // 공통으로 사용되는 프로필 위젯
+  Widget buildUserProfile() {
+    return Column(
+      children: [
+        if (user?.kakaoAccount?.profile?.profileImageUrl != null)
+          CircleAvatar(
+            radius: AppConstants.avatarRadius,
+            backgroundImage: NetworkImage(
+              user!.kakaoAccount!.profile!.profileImageUrl!,
+            ),
+          ),
+        const SizedBox(height: AppConstants.defaultSpacing),
+        Text(
+          '환영합니다, ${user?.kakaoAccount?.profile?.nickname ?? '사용자'}님!',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+      ],
+    );
+  }
+}
+
 // 카카오 로그인 화면 위젯
 class KakaoLogin extends StatefulWidget {
   const KakaoLogin({super.key});
@@ -225,46 +301,22 @@ class KakaoLogin extends StatefulWidget {
   State<KakaoLogin> createState() => _KakaoLoginState();
 }
 
-class _KakaoLoginState extends State<KakaoLogin> {
+class _KakaoLoginState extends State<KakaoLogin> with UserStateMixin {
   // 카카오톡 앱 설치 여부 상태
   bool _isKakaoTalkInstalled = false;
-  User? _user; // 사용자 정보를 저장할 변수 추가
-  bool _isLoading = true; // 로딩 상태 추가
 
   @override
   void initState() {
     super.initState();
     _initKakaoTalkInstalled();
-    _loadUserState(); // 사용자 상태 로드
-  }
-
-  // 현재 로그인 상태 확인
-  Future<void> _loadUserState() async {
-    try {
-      User? user = await UserApi.instance.me();
-      if (mounted) {
-        setState(() {
-          _user = user;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _user = null;
-          _isLoading = false;
-        });
-      }
-    }
+    loadUserData(); // 사용자 상태 로드
   }
 
   // 카카오톡 설치 여부 확인 함수
   Future<void> _initKakaoTalkInstalled() async {
     final installed = await isKakaoTalkInstalled();
-    // ignore: avoid_print
-    print('isKakaoTalkInstalled : $installed');
-    // ignore: avoid_print
-    print(await KakaoSdk.origin);
+    debugPrint('isKakaoTalkInstalled : $installed');
+    debugPrint(await KakaoSdk.origin);
     if (mounted) {
       setState(() {
         _isKakaoTalkInstalled = installed;
@@ -292,7 +344,7 @@ class _KakaoLoginState extends State<KakaoLogin> {
     try {
       OAuthToken token = await UserApi.instance.loginWithKakaoAccount();
       debugPrint('카카오계정으로 로그인 성공 ${token.accessToken}');
-      await _loadUserState(); // 로그인 후 사용자 정보 새로고침
+      await loadUserData(); // 로그인 후 사용자 정보 새로고침
       if (mounted) {
         _moveToLoginDone();
       }
@@ -306,7 +358,7 @@ class _KakaoLoginState extends State<KakaoLogin> {
     try {
       OAuthToken token = await UserApi.instance.loginWithKakaoTalk();
       debugPrint('카카오톡으로 로그인 성공 ${token.accessToken}');
-      await _loadUserState(); // 로그인 후 사용자 정보 새로고침
+      await loadUserData(); // 로그인 후 사용자 정보 새로고침
       if (mounted) {
         _moveToLoginDone();
       }
@@ -322,7 +374,7 @@ class _KakaoLoginState extends State<KakaoLogin> {
       await UserApi.instance.unlink();
       if (mounted) {
         setState(() {
-          _user = null;
+          user = null;
         });
         ErrorHandler.showError(context, '로그아웃 성공');
       }
@@ -343,12 +395,8 @@ class _KakaoLoginState extends State<KakaoLogin> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+    if (isLoading) {
+      return Scaffold(body: buildLoadingIndicator());
     }
     return Scaffold(
       appBar: AppBar(
@@ -358,23 +406,10 @@ class _KakaoLoginState extends State<KakaoLogin> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // 로그인 버튼
-            if (_user != null) ...[
-              // 프로필 이미지
-              if (_user?.kakaoAccount?.profile?.profileImageUrl != null)
-                CircleAvatar(
-                  radius: AppConstants.avatarRadius,
-                  backgroundImage: NetworkImage(
-                    _user!.kakaoAccount!.profile!.profileImageUrl!,
-                  ),
-                ),
+            if (user != null) ...[
+              buildUserProfile(),
               const SizedBox(height: AppConstants.defaultSpacing),
-              Text(
-                '환영합니다, ${_user?.kakaoAccount?.profile?.nickname ?? '사용자'}님!',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: AppConstants.defaultSpacing),
-              // 네비게이션으로 이동하는 버튼
+              // 길 안내 버튼 목적지 입력(logindone) 위젯으로 넘어감
               ElevatedButton(
                 onPressed: _moveToLoginDone,
                 style: AppStyles.elevatedButtonStyle,
@@ -411,8 +446,7 @@ class LoginDone extends StatefulWidget {
   State<LoginDone> createState() => _LoginDoneState();
 }
 
-class _LoginDoneState extends State<LoginDone> {
-  User? _user;
+class _LoginDoneState extends State<LoginDone> with UserStateMixin {
   final TextEditingController _destinationController = TextEditingController();
   List<Place> _searchResults = const [];
   bool _isSearching = false;
@@ -420,7 +454,7 @@ class _LoginDoneState extends State<LoginDone> {
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    loadUserData();
   }
 
   @override
@@ -451,7 +485,7 @@ class _LoginDoneState extends State<LoginDone> {
           _isSearching = false;
         });
         if (results.isEmpty) {
-          ErrorHandler.showError(context, '검색 결과가 없습니다.');
+          handleError('검색 결과가 없습니다.');
         }
       }
     } catch (e) {
@@ -459,7 +493,7 @@ class _LoginDoneState extends State<LoginDone> {
         setState(() {
           _isSearching = false;
         });
-        ErrorHandler.showError(context, '검색 중 오류가 발생했습니다: $e');
+        handleError('검색 중 오류가 발생했습니다: $e');
       }
     }
   }
@@ -478,99 +512,89 @@ class _LoginDoneState extends State<LoginDone> {
             coordType: CoordType.wgs84,
           ),
         );
+        // 내비게이션 실행 후 상태 갱신
+        if (mounted) {
+          loadUserData();
+        }
       } else {
         await launchBrowserTab(Uri.parse(NaviApi.webNaviInstall));
-        if (mounted) {
-          ErrorHandler.showError(
-            context,
-            '카카오내비 앱이 설치되어 있지 않습니다. 설치 페이지로 이동합니다.',
-          );
-        }
+        handleError('카카오내비 앱이 설치되어 있지 않습니다. 설치 페이지로 이동합니다.');
       }
     } catch (e) {
-      if (mounted) {
-        ErrorHandler.showError(context, '네비게이션 실행 중 오류가 발생했습니다: $e');
-      }
-    }
-  }
-
-  Future<void> _loadUserData() async {
-    try {
-      User user = await UserApi.instance.me();
-      setState(() {
-        _user = user;
-      });
-      debugPrint('사용자 정보 요청 성공'
-          '\n회원번호: ${user.id}'
-          '\n닉네임: ${user.properties}');
-      debugPrint('${_user?.kakaoAccount?.profile!.profileImageUrl}');
-    } catch (e) {
-      if (mounted) {
-        ErrorHandler.showError(context, '사용자 정보를 불러오는데 실패했습니다: $e');
-      }
+      handleError('네비게이션 실행 중 오류가 발생했습니다: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('로그인 성공'),
-      ),
-      // Stack을 사용하여 배경 터치 영역과 컨텐츠를 분리
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              // 기존 사용자 정보 표시
-              if (_user?.kakaoAccount?.profile!.profileImageUrl != null)
-                CircleAvatar(
-                  radius: AppConstants.avatarRadius,
-                  backgroundImage: NetworkImage(
-                    _user!.kakaoAccount!.profile!.profileImageUrl!,
+    if (isLoading) {
+      return Scaffold(body: buildLoadingIndicator());
+    }
+    return PopScope(
+      canPop: false, // 기본 뒤로가기를 막습니다
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (didPop) return;
+
+        // 뒤로가기 버튼 처리
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const KakaoLogin()),
+        );
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('로그인 성공'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const KakaoLogin()),
+              );
+            },
+          ),
+        ),
+        // Stack을 사용하여 배경 터치 영역과 컨텐츠를 분리
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                buildUserProfile(),
+                const SizedBox(height: AppConstants.largeSpacing),
+                // 검색 입력 필드
+                TextField(
+                  controller: _destinationController,
+                  decoration: AppStyles.searchFieldDecoration.copyWith(
+                    suffixIcon: IconButton(
+                      icon: _isSearching
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 3),
+                            )
+                          : const Icon(Icons.search),
+                      onPressed: _searchPlace,
+                    ),
+                  ),
+                  onSubmitted: (_) => _searchPlace(), // 엔터키로 검색 가능
+                  // 키보드의 검색 버튼을 검색 아이콘으로 변경
+                  textInputAction: TextInputAction.search,
+                ),
+                const SizedBox(height: AppConstants.defaultSpacing),
+                // 검색 결과 리스트
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _searchResults.length,
+                    itemBuilder: (context, index) {
+                      final place = _searchResults[index];
+                      return SearchResultItem(
+                        place: place,
+                        onNavigate: () => _navigateToPlace(place),
+                      );
+                    },
                   ),
                 ),
-              const SizedBox(height: AppConstants.defaultSpacing),
-              Text(
-                '환영합니다, ${_user?.kakaoAccount?.profile?.nickname ?? '사용자'}님!',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: AppConstants.largeSpacing),
-              // 검색 입력 필드
-              TextField(
-                controller: _destinationController,
-                decoration: AppStyles.searchFieldDecoration.copyWith(
-                  suffixIcon: IconButton(
-                    icon: _isSearching
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 3),
-                          )
-                        : const Icon(Icons.search),
-                    onPressed: _searchPlace,
-                  ),
-                ),
-                onSubmitted: (_) => _searchPlace(), // 엔터키로 검색 가능
-                // 키보드의 검색 버튼을 검색 아이콘으로 변경
-                textInputAction: TextInputAction.search,
-              ),
-              const SizedBox(height: AppConstants.defaultSpacing),
-              // 검색 결과 리스트
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _searchResults.length,
-                  itemBuilder: (context, index) {
-                    final place = _searchResults[index];
-                    return SearchResultItem(
-                      place: place,
-                      onNavigate: () => _navigateToPlace(place),
-                    );
-                  },
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
